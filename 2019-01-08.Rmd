@@ -1,0 +1,205 @@
+---
+title: Tidy Tuesday January 8, 2019
+---
+
+```{r}
+knitr::opts_chunk$set(
+  echo = TRUE
+)
+
+library(tidyverse)
+```
+
+Doing this in favorite Gather -> Cook -> Analyze -> Present format, as implemented in my [represtools package](https://cran.r-project.org/package=represtools). We'll note be presenting results - this is just EDA for fun.
+
+## Gather
+
+```{r}
+url <- 'https://raw.githubusercontent.com/rfordatascience/tidytuesday/master/data/2019/2019-01-08/IMDb_Economist_tv_ratings.csv'
+
+tbl_raw <- read_csv(url)
+```
+
+Raw data in hand, I start to cook what I have. This is largely normalization. It's overkill, but I'm fussy and struggle to look at data any other way. 
+
+## Cook: Title table
+
+The raw data is a mashup of title, season and genre. We can split those out.
+
+Title is easy to pick up. Simply `select()` the ID and the title and then run `unique()`.
+
+```{r}
+tbl_title <- tbl_raw %>% 
+  select(titleId, title) %>% 
+  unique()
+```
+
+## Cook: Check genre change
+
+We might expect that genre is a property of the title. That is, each title has one genre value which remains the same over time. That's not actually the case.
+
+```{r}
+tbl_genre_switch <- tbl_raw %>% 
+  select(titleId, genres) %>% 
+  group_by(titleId) %>% 
+  summarise(num_genre = n_distinct(genres)) %>% 
+  ungroup() %>% 
+  filter(num_genre > 1) %>% 
+  inner_join(tbl_raw, by = 'titleId') %>% 
+  select(title, date, genres)
+
+tbl_genre_switch
+```
+
+Twin Peaks has different genre information between its two incarnations. Seems it morphed from a mystery to fantasy. Not a big deal and one that we could manually correct. However, I'm not going to touch it and will simply 
+
+## Cook: Seasons
+
+This is simply dropping the genre and title fields. In addition, we will add a column for the year, which will help us visualize later.
+
+```{r}
+tbl_season <- tbl_raw %>% 
+  select(-genres, -title) %>% 
+  mutate(
+      year = lubridate::year(date)
+    , semester = lubridate::semester(date, with_year = TRUE)
+  )
+```
+
+## Cook: Split genres
+
+The genres are contained in a vector, which is not typically how I deal with normalized data. We've seen earlier that at least one title switches genre
+
+```{r}
+tbl_genre <- tbl_raw %>% 
+  select(titleId, genre = genres)
+
+max_genres <- tbl_genre %>% 
+  mutate(
+    commas = str_count(genre, ',')
+  ) %>% 
+  summarise(
+    max_col = max(commas) + 1
+  ) %>% 
+  unlist()
+```
+
+```{r }
+tbl_genre <- tbl_genre %>% 
+  tidyr::separate(genre, into = as.character(seq_len(max_genres)), sep = ',') %>% 
+  gather(id, genre, -titleId) %>% 
+  filter(!is.na(genre)) %>% 
+  select(-id) %>% 
+  unique()
+```
+
+Cook: Consolidate genres
+
+```{r}
+tbl_genre <- tbl_genre %>% 
+  mutate(
+    genre_other = forcats::fct_lump(genre, n = 8)
+  )
+```
+
+## Analyze: 1 - Genre over time
+
+```{r}
+tbl_genre_time <- tbl_genre %>% 
+  inner_join(tbl_rating %>% select(titleId, date, year, av_rating), by = 'titleId')
+```
+
+```{r }
+tbl_genre_time %>% 
+  group_by(genre_other, year) %>% 
+  summarise(
+    count = n()
+  ) %>% 
+  ggplot(aes(year, count, color = genre_other)) + 
+  geom_point()
+```
+
+```{r}
+tbl_genre_time %>% 
+  ggplot(aes(year, av_rating, color = genre_other)) + 
+  geom_point() +
+  geom_smooth() +
+  facet_wrap(~genre_other)
+```
+
+```{r}
+tbl_genre_time %>% 
+  mutate(year = as.factor(year)) %>% 
+  ggplot(aes(year, av_rating, color = genre_other)) + 
+  geom_boxplot() +
+  facet_wrap(~genre_other)
+```
+
+```{r}
+tbl_genre_single <- tbl_genre %>% 
+  group_by(titleId) %>% 
+  summarise(
+    num_genres = n()
+  ) %>% 
+  filter(
+    num_genres == 1
+  ) %>% 
+  inner_join(tbl_genre)
+
+tbl_pure_drama <- tbl_genre_single %>% 
+  filter(genre == "Drama") %>% 
+  select(titleId) %>% 
+  inner_join(tbl_rating)
+```
+
+```{r}
+tbl_pure_drama %>% 
+  mutate(year = as.factor(year)) %>% 
+  ggplot(aes(year, av_rating)) + 
+  geom_boxplot()
+```
+
+```{r}
+tbl_pure_drama %>% 
+  ggplot(aes(year, av_rating)) + 
+  geom_point() + 
+  geom_smooth()
+```
+
+```{r}
+tbl_pure_drama %>% 
+  ggplot(aes(year)) + 
+  geom_bar()
+```
+
+Non-comedy drama
+
+```{r}
+tbl_drama_non_comedy <- tbl_genre %>% 
+  anti_join(
+      tbl_genre %>% filter(genre == 'Comedy')
+    , by = 'titleId'
+  ) %>% 
+  select(titleId) %>% 
+  unique() %>% 
+  inner_join(tbl_rating)
+```
+
+```{r}
+tbl_drama_non_comedy %>% 
+  ggplot(aes(year)) + 
+  geom_bar()
+```
+
+```{r}
+tbl_drama_non_comedy %>% 
+  mutate(year = as.factor(year)) %>% 
+  ggplot(aes(year, av_rating)) + 
+  geom_boxplot()
+
+tbl_drama_non_comedy %>% 
+  ggplot(aes(year, av_rating)) + 
+  geom_point() + 
+  geom_smooth()
+```
+
