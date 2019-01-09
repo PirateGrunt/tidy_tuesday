@@ -68,7 +68,7 @@ tbl_season <- tbl_raw %>%
 
 ## Cook: Split genres
 
-The genres are contained in a vector, which is not typically how I deal with normalized data. We've seen earlier that at least one title switches genre
+The genres are contained in a vector, which is not typically how I deal with normalized data. We can use `separate` to change that single column into multiple, but first we need to know how many columns to create.  `str_count` of the comma separator will do that. We need to make sure to add 1 to the result.
 
 ```{r}
 tbl_genre <- tbl_raw %>% 
@@ -84,6 +84,8 @@ max_genres <- tbl_genre %>%
   unlist()
 ```
 
+Now, we can split the genre column into 3. We will be warned that not every row has all three. Cool. We'll filter them out, after using gather to translate our data into a table which stores a titleId and a genre value.
+
 ```{r }
 tbl_genre <- tbl_genre %>% 
   tidyr::separate(genre, into = as.character(seq_len(max_genres)), sep = ',') %>% 
@@ -93,7 +95,11 @@ tbl_genre <- tbl_genre %>%
   unique()
 ```
 
+In structuring the data this way, we are assuming that we can map the ratings data to genre, irrespective of season. That's not 100% accurate, as we saw earlier. The practical effect here means that Twin Peaks will map to four different genres
+
 Cook: Consolidate genres
+
+There are many genres, so let's focus on the top 8. `forcats` will do this. We add this as a new column so that we can see the more granular value for genre, if we'd like.
 
 ```{r}
 tbl_genre <- tbl_genre %>% 
@@ -106,7 +112,7 @@ tbl_genre <- tbl_genre %>%
 
 ```{r}
 tbl_genre_time <- tbl_genre %>% 
-  inner_join(tbl_rating %>% select(titleId, date, year, av_rating), by = 'titleId')
+  inner_join(tbl_season %>% select(titleId, date, year, av_rating), by = 'titleId')
 ```
 
 ```{r }
@@ -149,7 +155,7 @@ tbl_genre_single <- tbl_genre %>%
 tbl_pure_drama <- tbl_genre_single %>% 
   filter(genre == "Drama") %>% 
   select(titleId) %>% 
-  inner_join(tbl_rating)
+  inner_join(tbl_season)
 ```
 
 ```{r}
@@ -182,7 +188,7 @@ tbl_drama_non_comedy <- tbl_genre %>%
   ) %>% 
   select(titleId) %>% 
   unique() %>% 
-  inner_join(tbl_rating)
+  inner_join(tbl_season)
 ```
 
 ```{r}
@@ -200,6 +206,24 @@ tbl_drama_non_comedy %>%
 tbl_drama_non_comedy %>% 
   ggplot(aes(year, av_rating)) + 
   geom_point() + 
+  geom_smooth()
+```
+
+It looks as though in recent years,the overall quality has improved, but there are more negative outliers. That is, dramas are marginally better overall, but the bad ones are worse. We can get a sense for this by examining the skewness of the samples. It's clear that every year is negatively skewed
+
+```{r}
+library(e1071)
+
+tbl_drama_non_comedy_year <- tbl_drama_non_comedy %>% 
+  group_by(year) %>% 
+  summarise_at(
+      'av_rating'
+    , .funs = funs(mean, median, sd, var, skewness, kurtosis)
+  )
+
+tbl_drama_non_comedy_year %>% 
+  ggplot(aes(year, skewness)) +
+  geom_point() +
   geom_smooth()
 ```
 
